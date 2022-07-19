@@ -9,6 +9,7 @@ import numpy as np
 from nav_msgs.msg import Odometry, OccupancyGrid
 import configparser
 import gym
+import tf2_ros
 import tf
 from crowd_nav.policy.policy_factory import policy_factory
 from crowd_sim.envs.utils.state import ObservableState, FullState, JointState
@@ -25,6 +26,9 @@ from geometry_msgs.msg import (
 )
 from std_msgs.msg import Int32, ColorRGBA
 
+from ford_msgs.msg import Clusters
+
+
 # from people_msgs.msg import Person, People
 from visualization_msgs.msg import Marker, MarkerArray
 
@@ -35,7 +39,7 @@ ROBOT_V_PREF = 0.5
 DISCOMFORT_DIST = 0.1
 FAKE_HUMAN_PX = -1.7
 FAKE_HUMAN_PY = 14.3
-TIME_LIMIT = 120
+TIME_LIMIT = 180
 GOAL_TOLERANCE = 0.5
 
 
@@ -140,7 +144,7 @@ class RobotAction(object):
         self.robot_odom_sub = rospy.Subscriber(
             "/odom", Odometry, self.robot_vel_on_map_calculator
         )
-        # self.people_sub = rospy.Subscriber('/people', People, self.update_humans)
+        self.people_sub = rospy.Subscriber("/obst_odom", Clusters, self.update_humans)
         self.goal_sub = rospy.Subscriber("/subgoal", PoseStamped, self.get_goal_on_map)
         self.global_costmap_sub = rospy.Subscriber(
             "/move_base/global_costmap/costmap", OccupancyGrid, self.get_gc
@@ -176,12 +180,18 @@ class RobotAction(object):
     def robot_vel_on_map_calculator(self, msg):
         self.update_robot_pos(msg)
         vel_linear = msg.twist.twist.linear
-        listener_v.waitForTransform(
-            "/map", "/base_footprint", rospy.Time(), rospy.Duration(4)
-        )
-        trans, rot = listener_v.lookupTransform("/map", "/base_footprint", rospy.Time())
+        # listener_v.waitForTransform(
+        #     "/map", "/base_footprint", rospy.Time(), rospy.Duration(4)
+        # )
+        trans = tfBuffer.lookup_transform("map", "base_footprint", rospy.Time())
+        rot = trans.transform.rotation
         # rotate vector 'vel_linear' by quaternion 'rot'
-        q1 = rot
+        q1 = list()
+        q1.append(rot.x)
+        q1.append(rot.y)
+        q1.append(rot.z)
+        q1.append(rot.w)
+
         q2 = list()
         q2.append(vel_linear.x)
         q2.append(vel_linear.y)
@@ -199,9 +209,14 @@ class RobotAction(object):
         self.IsObReceived = True
         self.humans = list()
         self.ob = list()
-        for p in msg.people:
+        for i in range(len(msg.mean_points)):
             # dist = np.linalg.norm(np.array([self.px,self.py])-np.array([p.position.x,p.position.y]))
-            human = Human(p.position.x, p.position.y, p.velocity.x, p.velocity.y)
+            human = Human(
+                msg.mean_points[i].x,
+                msg.mean_points[i].y,
+                msg.velocities[i].x,
+                msg.velocities[i].y,
+            )
             self.humans.append(human)
         for human in self.humans:
             self.ob.append(human.get_observable_state())
@@ -392,7 +407,8 @@ if __name__ == "__main__":
     rospy.init_node("sarl_original_node", anonymous=True)
     rate = rospy.Rate(4)  # 4 Hz, time_step=0.25
     robot_act = RobotAction()
-    listener_v = tf.TransformListener()
+    tfBuffer = tf2_ros.Buffer()
+    listener_v = tf2_ros.TransformListener(tfBuffer)
 
     while not rospy.is_shutdown():
 

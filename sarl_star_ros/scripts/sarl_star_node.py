@@ -10,6 +10,7 @@ from nav_msgs.msg import Odometry, OccupancyGrid
 import configparser
 import gym
 import tf
+import tf2_ros
 from crowd_nav.policy.policy_factory import policy_factory
 from crowd_sim.envs.utils.state import ObservableState, FullState, JointState
 from crowd_sim.envs.crowd_sim import CrowdSim
@@ -107,7 +108,7 @@ class RobotAction(object):
     def __init__(self):
         self.Is_lg_Received = False
         self.IsAMCLReceived = False
-        self.IsObReceived = False
+        self.IsObReceived = True
         self.Is_gc_Received = False
         self.getStartPoint = False
         self.Is_lg_Reached = False
@@ -124,6 +125,7 @@ class RobotAction(object):
         self.theta = None
         self.humans = None
         self.ob = None
+        self.ob = list()
         self.state = None
         self.cmd_vel = Twist()
         self.plan_counter = 0
@@ -169,18 +171,20 @@ class RobotAction(object):
         if not self.getStartPoint:
             rospy.loginfo("Start point is:(%s,%s)" % (self.px, self.py))
             self.getStartPoint = True
-        self.visualize_trajectory(position, orientation)
+        # self.visualize_trajectory(position, orientation)
 
     def robot_vel_on_map_calculator(self, msg):
+        self.update_robot_pos(msg)
+
         vel_linear = msg.twist.twist.linear
-        listener_v.waitForTransform(
-            "/map", "/base_footprint", rospy.Time(0), rospy.Duration(10)
-        )
-        trans, rot = listener_v.lookupTransform(
-            "/map", "/base_footprint", rospy.Time(0)
-        )
+        trans = tfBuffer.lookup_transform("map", "base_footprint", rospy.Time())
+        rot = trans.transform.rotation
         # rotate vector 'vel_linear' by quaternion 'rot'
-        q1 = rot
+        q1 = list()
+        q1.append(rot.x)
+        q1.append(rot.y)
+        q1.append(rot.z)
+        q1.append(rot.w)
         q2 = list()
         q2.append(vel_linear.x)
         q2.append(vel_linear.y)
@@ -206,11 +210,10 @@ class RobotAction(object):
             self.ob.append(human.get_observable_state())
 
     def get_goal_on_map(self, msg):
+        self.Is_goal_received = True
         self.Is_lg_Received = True
-        listener_g.waitForTransform("/map", "/odom", rospy.Time(0), rospy.Duration(10))
-        tfmsg = listener_g.transformPose("/map", msg)
-        self.received_gx = tfmsg.pose.position.x
-        self.received_gy = tfmsg.pose.position.y
+        self.received_gx = msg.pose.position.x
+        self.received_gy = msg.pose.position.y
 
     def get_gc(self, msg):
         if not self.Is_gc_Received:
@@ -382,9 +385,10 @@ if __name__ == "__main__":
 
     # try:
     rospy.init_node("sarl_star_node", anonymous=True)
+    tfBuffer = tf2_ros.Buffer()
+    listener_v = tf2_ros.TransformListener(tfBuffer)
     rate = rospy.Rate(4)  # 4Hz, time_step=0.25
     robot_act = RobotAction()
-    listener_v = tf.TransformListener()
     listener_g = tf.TransformListener()
 
     while not rospy.is_shutdown():
@@ -400,7 +404,7 @@ if __name__ == "__main__":
             and robot_act.IsAMCLReceived
             and robot_act.IsObReceived
         ):
-
+            print("hello")
             # travel time
             if not begin_travel:
                 begin_travel_time = rospy.get_time()
