@@ -39,7 +39,7 @@ ROBOT_V_PREF = 0.5
 DISCOMFORT_DIST = 0.1
 FAKE_HUMAN_PX = -1.7
 FAKE_HUMAN_PY = 14.3
-TIME_LIMIT = 180
+TIME_LIMIT = 220
 GOAL_TOLERANCE = 0.5
 
 
@@ -411,12 +411,6 @@ if __name__ == "__main__":
     listener_v = tf2_ros.TransformListener(tfBuffer)
 
     while not rospy.is_shutdown():
-
-        print(" ---------------------------- ")
-        print("goal reached", robot_act.Is_goal_reached)
-        print("goal received", robot_act.Is_goal_received)
-        print("amcl received", robot_act.IsAMCLReceived)
-        print("obs received", robot_act.IsObReceived)
 
         if robot_act.Is_goal_reached:
             finish_travel_time = rospy.get_time()
