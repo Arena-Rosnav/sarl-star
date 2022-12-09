@@ -142,23 +142,23 @@ class RobotAction(object):
         # subscribers
         # self.robot_pose_sub = rospy.Subscriber('/amcl_pose', PoseWithCovarianceStamped, self.update_robot_pos)
         self.robot_odom_sub = rospy.Subscriber(
-            "/odom", Odometry, self.robot_vel_on_map_calculator
+            "odom", Odometry, self.robot_vel_on_map_calculator
         )
         self.people_sub = rospy.Subscriber("/obst_odom", Clusters, self.update_humans)
-        self.goal_sub = rospy.Subscriber("/subgoal", PoseStamped, self.get_goal_on_map)
+        self.goal_sub = rospy.Subscriber("subgoal", PoseStamped, self.get_goal_on_map)
         self.global_costmap_sub = rospy.Subscriber(
-            "/move_base/global_costmap/costmap", OccupancyGrid, self.get_gc
+            "move_base/global_costmap/costmap", OccupancyGrid, self.get_gc
         )
         # publishers
-        self.cmd_vel_pub = rospy.Publisher("/cmd_vel", Twist, queue_size=1)
+        self.cmd_vel_pub = rospy.Publisher("cmd_vel", Twist, queue_size=1)
 
-        self.goal_marker_pub = rospy.Publisher("/goal_marker", Marker, queue_size=1)
-        self.action_marker_pub = rospy.Publisher("/action_marker", Marker, queue_size=1)
+        self.goal_marker_pub = rospy.Publisher("goal_marker", Marker, queue_size=1)
+        self.action_marker_pub = rospy.Publisher("action_marker", Marker, queue_size=1)
         self.trajectory_marker_pub = rospy.Publisher(
-            "/trajectory_marker", Marker, queue_size=1
+            "trajectory_marker", Marker, queue_size=1
         )
         self.vehicle_marker_pub = rospy.Publisher(
-            "/vehicle_marker", Marker, queue_size=1
+            "vehicle_marker", Marker, queue_size=1
         )
 
     def update_robot_pos(self, msg):
@@ -180,10 +180,13 @@ class RobotAction(object):
     def robot_vel_on_map_calculator(self, msg):
         self.update_robot_pos(msg)
         vel_linear = msg.twist.twist.linear
-        # listener_v.waitForTransform(
-        #     "/map", "/base_footprint", rospy.Time(), rospy.Duration(4)
-        # )
-        trans = tfBuffer.lookup_transform("map", "base_footprint", rospy.Time())
+        
+        base_frame = rospy.get_param("robot_base_frame", "base_footprint")
+        ns_ = rospy.get_namespace()
+        if (ns_ != "" and ns_ != "/"):
+            base_frame = ns_[1:] + base_frame
+            
+        trans = tfBuffer.lookup_transform("map", base_frame, rospy.Time())
         rot = trans.transform.rotation
         # rotate vector 'vel_linear' by quaternion 'rot'
         q1 = list()
