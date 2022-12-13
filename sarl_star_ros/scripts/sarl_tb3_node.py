@@ -1,4 +1,4 @@
-#!/usr/bin/python2.7
+#!/usr/bin/env python3
 # Author: Keyu Li <kyli@link.cuhk.edu.hk>
 
 from __future__ import division
@@ -9,12 +9,26 @@ import numpy as np
 from nav_msgs.msg import Odometry, OccupancyGrid
 import configparser
 import gym
+import tf2_ros
 import tf
 from crowd_nav.policy.policy_factory import policy_factory
 from crowd_sim.envs.utils.state import ObservableState, FullState, JointState
+from crowd_sim.envs.crowd_sim import CrowdSim
 import rospy
-from geometry_msgs.msg import Point, Vector3, Twist, Pose, PoseStamped, PoseWithCovarianceStamped, TwistWithCovariance
+from geometry_msgs.msg import (
+    Point,
+    Vector3,
+    Twist,
+    Pose,
+    PoseStamped,
+    PoseWithCovarianceStamped,
+    TwistWithCovariance,
+)
 from std_msgs.msg import Int32, ColorRGBA
+
+from ford_msgs.msg import Clusters
+
+
 # from people_msgs.msg import Person, People
 from visualization_msgs.msg import Marker, MarkerArray
 
@@ -25,11 +39,13 @@ ROBOT_V_PREF = 0.5
 DISCOMFORT_DIST = 0.1
 FAKE_HUMAN_PX = -1.7
 FAKE_HUMAN_PY = 14.3
-TIME_LIMIT = 120
+TIME_LIMIT = 220
 GOAL_TOLERANCE = 0.5
+
 
 def add(v1, v2):
     return Vector3(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z)
+
 
 class Robot(object):
     def __init__(self):
@@ -53,7 +69,17 @@ class Robot(object):
         self.theta = theta
 
     def get_full_state(self):
-        return FullState(self.px, self.py, self.vx, self.vy, self.radius, self.gx, self.gy, self.v_pref, self.theta)
+        return FullState(
+            self.px,
+            self.py,
+            self.vx,
+            self.vy,
+            self.radius,
+            self.gx,
+            self.gy,
+            self.v_pref,
+            self.theta,
+        )
 
     def get_position(self):
         return self.px, self.py
@@ -62,8 +88,14 @@ class Robot(object):
         return self.gx, self.gy
 
     def reached_destination(self):
-        return np.linalg.norm(np.array(self.get_position()) - np.array(self.get_goal_position())) < GOAL_TOLERANCE
+        return (
+            np.linalg.norm(
+                np.array(self.get_position()) - np.array(self.get_goal_position())
+            )
+            < GOAL_TOLERANCE
+        )
         #      || (position - goal position) ||
+
 
 class Human(object):
     def __init__(self, px, py, vx, vy):
@@ -72,8 +104,10 @@ class Human(object):
         self.py = py
         self.vx = vx
         self.vy = vy
+
     def get_observable_state(self):
         return ObservableState(self.px, self.py, self.vx, self.vy, self.radius)
+
 
 class RobotAction(object):
     def __init__(self):
@@ -107,17 +141,25 @@ class RobotAction(object):
 
         # subscribers
         # self.robot_pose_sub = rospy.Subscriber('/amcl_pose', PoseWithCovarianceStamped, self.update_robot_pos)
-        self.robot_odom_sub = rospy.Subscriber('/odom', Odometry, self.robot_vel_on_map_calculator)
-        # self.people_sub = rospy.Subscriber('/people', People, self.update_humans)
-        self.goal_sub = rospy.Subscriber('/plan_manager/subgoal', PoseStamped, self.get_goal_on_map)
-        self.global_costmap_sub = rospy.Subscriber('/move_base/global_costmap/costmap', OccupancyGrid, self.get_gc)
+        self.robot_odom_sub = rospy.Subscriber(
+            "odom", Odometry, self.robot_vel_on_map_calculator
+        )
+        self.people_sub = rospy.Subscriber("/obst_odom", Clusters, self.update_humans)
+        self.goal_sub = rospy.Subscriber("subgoal", PoseStamped, self.get_goal_on_map)
+        self.global_costmap_sub = rospy.Subscriber(
+            "move_base/global_costmap/costmap", OccupancyGrid, self.get_gc
+        )
         # publishers
-        self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
+        self.cmd_vel_pub = rospy.Publisher("cmd_vel", Twist, queue_size=1)
 
-        self.goal_marker_pub = rospy.Publisher('/goal_marker', Marker, queue_size=1)
-        self.action_marker_pub = rospy.Publisher('/action_marker', Marker, queue_size=1)
-        self.trajectory_marker_pub = rospy.Publisher('/trajectory_marker', Marker, queue_size=1)
-        self.vehicle_marker_pub = rospy.Publisher('/vehicle_marker', Marker, queue_size=1)
+        self.goal_marker_pub = rospy.Publisher("goal_marker", Marker, queue_size=1)
+        self.action_marker_pub = rospy.Publisher("action_marker", Marker, queue_size=1)
+        self.trajectory_marker_pub = rospy.Publisher(
+            "trajectory_marker", Marker, queue_size=1
+        )
+        self.vehicle_marker_pub = rospy.Publisher(
+            "vehicle_marker", Marker, queue_size=1
+        )
 
     def update_robot_pos(self, msg):
         self.IsAMCLReceived = True
@@ -127,19 +169,32 @@ class RobotAction(object):
         self.px = msg.pose.pose.position.x
         self.py = msg.pose.pose.position.y
         q = msg.pose.pose.orientation
-        self.theta = np.arctan2(2.0*(q.w*q.z + q.x*q.y), 1-2*(q.y*q.y+q.z*q.z)) # bounded by [-pi, pi]
+        self.theta = np.arctan2(
+            2.0 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z)
+        )  # bounded by [-pi, pi]
         if not self.getStartPoint:
-            rospy.loginfo("Start point is:(%s,%s)" % (self.px,self.py))
-            self.getStartPoint = True 
+            rospy.loginfo("Start point is:(%s,%s)" % (self.px, self.py))
+            self.getStartPoint = True
         self.visualize_trajectory(position, orientation)
 
     def robot_vel_on_map_calculator(self, msg):
         self.update_robot_pos(msg)
         vel_linear = msg.twist.twist.linear
-        listener_v.waitForTransform('/map', '/base_footprint', rospy.Time(), rospy.Duration(4))
-        trans, rot = listener_v.lookupTransform('/map', '/base_footprint', rospy.Time())
+        
+        base_frame = rospy.get_param("robot_base_frame", "base_footprint")
+        ns_ = rospy.get_namespace()
+        if (ns_ != "" and ns_ != "/"):
+            base_frame = ns_[1:] + base_frame
+            
+        trans = tfBuffer.lookup_transform("map", base_frame, rospy.Time())
+        rot = trans.transform.rotation
         # rotate vector 'vel_linear' by quaternion 'rot'
-        q1 = rot
+        q1 = list()
+        q1.append(rot.x)
+        q1.append(rot.y)
+        q1.append(rot.z)
+        q1.append(rot.w)
+
         q2 = list()
         q2.append(vel_linear.x)
         q2.append(vel_linear.y)
@@ -147,7 +202,7 @@ class RobotAction(object):
         q2.append(0.0)
         output_vel = tf.transformations.quaternion_multiply(
             tf.transformations.quaternion_multiply(q1, q2),
-            tf.transformations.quaternion_conjugate(q1)
+            tf.transformations.quaternion_conjugate(q1),
         )[:3]
         self.vx = output_vel[0]
         self.vy = output_vel[1]
@@ -157,9 +212,14 @@ class RobotAction(object):
         self.IsObReceived = True
         self.humans = list()
         self.ob = list()
-        for p in msg.people:
+        for i in range(len(msg.mean_points)):
             # dist = np.linalg.norm(np.array([self.px,self.py])-np.array([p.position.x,p.position.y]))
-            human = Human(p.position.x, p.position.y, p.velocity.x, p.velocity.y)
+            human = Human(
+                msg.mean_points[i].x,
+                msg.mean_points[i].y,
+                msg.velocities[i].x,
+                msg.velocities[i].y,
+            )
             self.humans.append(human)
         for human in self.humans:
             self.ob.append(human.get_observable_state())
@@ -201,8 +261,8 @@ class RobotAction(object):
         # Purple track for robot trajectory over time
         marker = Marker()
         marker.header.stamp = rospy.Time.now()
-        marker.header.frame_id = '/map'
-        marker.ns = 'robot'
+        marker.header.frame_id = "/map"
+        marker.ns = "robot"
         marker.id = self.num_pos
         marker.type = marker.CYLINDER
         marker.action = marker.ADD
@@ -237,7 +297,9 @@ class RobotAction(object):
         # update robot
 
         robot.set(self.px, self.py, self.gx, self.gy, self.vx, self.vy, self.theta)
-        dist_to_goal = np.linalg.norm(np.array(robot.get_position()) - np.array(robot.get_goal_position()))
+        dist_to_goal = np.linalg.norm(
+            np.array(robot.get_position()) - np.array(robot.get_goal_position())
+        )
 
         # compute command velocity
         if robot.reached_destination():
@@ -258,13 +320,15 @@ class RobotAction(object):
                    .......                    
                 ObservableState(pxn, pyn, vxn, vyn, radiusn)]
             """
-            if len(self.ob)==0:
-                self.ob = [ObservableState(FAKE_HUMAN_PX, FAKE_HUMAN_PY, 0, 0, HUMAN_RADIUS)]
+            if len(self.ob) == 0:
+                self.ob = [
+                    ObservableState(FAKE_HUMAN_PX, FAKE_HUMAN_PY, 0, 0, HUMAN_RADIUS)
+                ]
 
             self.state = JointState(robot.get_full_state(), self.ob)
 
             action = policy.predict(self.state)  # max_action
-            self.cmd_vel.linear.x = 0.5*action.v
+            self.cmd_vel.linear.x = 0.5 * action.v
             self.cmd_vel.linear.y = 0
             self.cmd_vel.linear.z = 0
             self.cmd_vel.angular.x = 0
@@ -272,7 +336,6 @@ class RobotAction(object):
             self.cmd_vel.angular.z = action.r
 
             print(self.cmd_vel.linear.x, self.cmd_vel.angular.z)
-
 
         ########### for debug ##########
         # dist_to_goal = np.linalg.norm(np.array(robot.get_position()) - np.array(robot.get_goal_position()))
@@ -285,35 +348,45 @@ class RobotAction(object):
         #     rospy.loginfo("%s-th action is planned: \n v: %s m/s \n r: %s rad/s"
         #                   % (self.plan_counter, self.cmd_vel.linear.x, self.cmd_vel.angular.z))
 
-
         # publish velocity
         self.cmd_vel_pub.publish(self.cmd_vel)
         self.plan_counter += 1
         self.visualize_action()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     begin_travel = False
     # set file dirs
-    model_dir = '../CrowdNav/crowd_nav/data/output/'
-    env_config_file = '../CrowdNav/crowd_nav/data/output/env.config'
-    policy_config_file = '../CrowdNav/crowd_nav/data/output/policy.config'
-    if os.path.exists(os.path.join(model_dir, 'resumed_rl_model.pth')):
-        model_weights = os.path.join(model_dir, 'resumed_rl_model.pth')
+    path_current_directory = os.path.dirname(__file__)
+    model_dir = os.path.join(
+        path_current_directory, "../CrowdNav/crowd_nav/data/output/"
+    )
+    env_config_file = os.path.join(
+        path_current_directory, "../CrowdNav/crowd_nav/data/output/env.config"
+    )
+    policy_config_file = os.path.join(
+        path_current_directory, "../CrowdNav/crowd_nav/data/output/policy.config"
+    )
+    if os.path.exists(os.path.join(model_dir, "resumed_rl_model.pth")):
+        model_weights = os.path.join(model_dir, "resumed_rl_model.pth")
     else:
-        model_weights = os.path.join(model_dir, 'rl_model.pth')
+        model_weights = os.path.join(model_dir, "rl_model.pth")
 
     # configure logging and device
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s, x%(levelname)s: %(message)s',
-                        datefmt="%Y-%m-%d %H:%M:%S")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s, x%(levelname)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     device = torch.device("cpu")
-    logging.info('Using device: %s', device)
+    logging.info("Using device: %s", device)
 
     # configure RL policy
-    policy = 'sarl'
-    phase = 'test'
+    policy = "sarl"
+    phase = "test"
     env_config = configparser.RawConfigParser()
     env_config.read(env_config_file)
-    env = gym.make('CrowdSim-v0')
+    env = CrowdSim()
     env.configure(env_config)
     env.discomfort_dist = DISCOMFORT_DIST
 
@@ -324,7 +397,7 @@ if __name__ == '__main__':
     policy = policy_factory[policy]()
     policy.configure(policy_config)
     policy.with_costmap = True
-    policy.query_env = False 
+    policy.query_env = False
     policy.get_model().load_state_dict(torch.load(model_weights))
     policy.set_phase(phase)
     policy.set_device(device)
@@ -334,20 +407,13 @@ if __name__ == '__main__':
     robot = Robot()
 
     # try:
-    rospy.init_node('sarl_original_node', anonymous=True)
+    rospy.init_node("sarl_original_node", anonymous=True)
     rate = rospy.Rate(4)  # 4 Hz, time_step=0.25
     robot_act = RobotAction()
-    listener_v = tf.TransformListener()
-
+    tfBuffer = tf2_ros.Buffer()
+    listener_v = tf2_ros.TransformListener(tfBuffer)
 
     while not rospy.is_shutdown():
-
-
-        print(" ---------------------------- ")
-        print("goal reached",robot_act.Is_goal_reached)
-        print("goal received",robot_act.Is_goal_received)
-        print("amcl received",robot_act.IsAMCLReceived)
-        print("obs received",robot_act.IsObReceived)
 
         if robot_act.Is_goal_reached:
             finish_travel_time = rospy.get_time()
@@ -357,7 +423,11 @@ if __name__ == '__main__':
 
         # wait for msgs of goal, AMCL and ob
 
-        if robot_act.Is_goal_received and robot_act.IsAMCLReceived and robot_act.IsObReceived:
+        if (
+            robot_act.Is_goal_received
+            and robot_act.IsAMCLReceived
+            and robot_act.IsObReceived
+        ):
 
             # travel time
             if not begin_travel:
@@ -377,9 +447,5 @@ if __name__ == '__main__':
                 break
         rate.sleep()
 
-
     # except rospy.ROSInterruptException:
     #     raise 0
-
-
-
