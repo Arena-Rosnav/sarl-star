@@ -180,14 +180,25 @@ class RobotAction(object):
     def robot_vel_on_map_calculator(self, msg):
         self.update_robot_pos(msg)
         vel_linear = msg.twist.twist.linear
-        
+
         base_frame = rospy.get_param("robot_base_frame", "base_footprint")
         ns_ = rospy.get_namespace()
-        if (ns_ != "" and ns_ != "/"):
+        if ns_ != "" and ns_ != "/":
             base_frame = ns_[1:] + base_frame
-            
-        trans = tfBuffer.lookup_transform("map", base_frame, rospy.Time())
-        rot = trans.transform.rotation
+
+        try:
+            trans = tfBuffer.lookup_transform(
+                "map", base_frame, rospy.Time(), rospy.Duration(0.5)
+            )
+            rot = trans.transform.rotation
+        except (
+            tf2_ros.LookupException,
+            tf2_ros.ConnectivityException,
+            tf2_ros.ExtrapolationException,
+        ) as e:
+            rospy.logwarn(e)
+            return
+
         # rotate vector 'vel_linear' by quaternion 'rot'
         q1 = list()
         q1.append(rot.x)
@@ -335,7 +346,7 @@ class RobotAction(object):
             self.cmd_vel.angular.y = 0
             self.cmd_vel.angular.z = action.r
 
-            print(self.cmd_vel.linear.x, self.cmd_vel.angular.z)
+            # print(self.cmd_vel.linear.x, self.cmd_vel.angular.z)
 
         ########### for debug ##########
         # dist_to_goal = np.linalg.norm(np.array(robot.get_position()) - np.array(robot.get_goal_position()))
@@ -439,7 +450,7 @@ if __name__ == "__main__":
             robot_act.gy = robot_act.received_gy
             robot_act.visualize_goal()
             robot_act.planner()
-            print("planned")
+            print("SARL action planned")
             finish_travel_time = rospy.get_time()
             t = finish_travel_time - begin_travel_time
             if t > TIME_LIMIT:
