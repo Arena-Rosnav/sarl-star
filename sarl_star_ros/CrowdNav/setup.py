@@ -15,13 +15,14 @@ setup(
         "crowd_sim.envs.utils",
     ],
     install_requires=[
-        "gitpython",
-        "gym",
-        "matplotlib",
-        "numpy",
-        "scipy",
-        "torch==1.11.0",
-        "torchvision",
+        # Dependencies should be already installed by poetry
+        # "gitpython",
+        # "gym",
+        # "matplotlib",
+        # "numpy",
+        # "scipy",
+        # #"torch",
+        # "torchvision",
     ],
     extras_require={
         "test": [
